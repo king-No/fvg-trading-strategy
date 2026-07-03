@@ -2,11 +2,22 @@
 """FVG 交易看板 — BTC"""
 import sqlite3, os, json
 from http.server import HTTPServer, BaseHTTPRequestHandler
-from datetime import datetime
+from datetime import datetime, timedelta
 from urllib.parse import urlparse
 
 DB_PATH = "/root/freqtrade/tradesv3.sqlite"
 PORT = 8899
+
+def bj_time(dt=None):
+    """UTC转北京时间 UTC+8"""
+    if dt is None:
+        return datetime.utcnow() + timedelta(hours=8)
+    if isinstance(dt, str):
+        try:
+            dt = datetime.fromisoformat(dt)
+        except:
+            return dt
+    return dt + timedelta(hours=8)
 
 def fetch_live():
     try:
@@ -85,7 +96,7 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             btc, upnl = fetch_live()
             _,_,_,realized = get_db_stats()
-            self.wfile.write(json.dumps({"btc":btc,"unrealized_pnl":upnl,"realized_pnl":realized,"ts":datetime.now().strftime('%H:%M:%S')}).encode())
+            self.wfile.write(json.dumps({"btc":btc,"unrealized_pnl":upnl,"realized_pnl":realized,"ts":bj_time().strftime('%H:%M:%S')}).encode())
             return
 
         self.send_response(200)
@@ -103,7 +114,7 @@ class Handler(BaseHTTPRequestHandler):
         parts = [f"""<!DOCTYPE html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>FVG 交易看板</title>{STYLES}</head><body>
 <h1> FVG 交易看板</h1>
-<div class="sub">BTC/USDT · OKX 模拟盘 · FVG v7.5 · 30%×3x</div>
+<div class="sub">BTC/USDT · OKX 模拟盘 · FVG v9.4 · 5x杠杆(1.5x有效)</div>
 <div class="price-bar">
   <div><span class="label">BTC/USDT</span><div class="btc" id="bp">{btc_str}</div></div>
   <div><span class="label">浮盈</span><div class="value" id="upnl" style="font-size:20px;color:{upnl_c}">{upnl_str}</div></div>
@@ -143,10 +154,10 @@ class Handler(BaseHTTPRequestHandler):
                             badge = '<span class="badge badge-rev">反转</span>'
                         ic = "🟢" if pp and pp > 0 else "🔴"
                         ps = f"{ic} {pp*100:+.2f}% ({f'${pu:+,.2f}' if pu and abs(pu)>=0.01 else '$0.00'})" if pp else "-"
-                    parts.append(f"<tr><td>#{r['id']}</td><td class='{sc}'>{side}</td><td>{lv}x</td><td>{str(r['open_date'])[:19] if r['open_date'] else '-'}</td><td>${op:,.2f}</td><td>{str(r['close_date'])[:19] if r['close_date'] else '-'}</td><td>{f'${cl:,.2f}' if cl else '-'}</td><td class='{'green' if pp and pp>0 else 'red'}'>{ps}</td><td>{badge}</td></tr>")
+                    parts.append(f"<tr><td>#{r['id']}</td><td class='{sc}'>{side}</td><td>{lv}x</td><td>{bj_time(r['open_date']).strftime('%m-%d %H:%M') if r['open_date'] else '-'}</td><td>${op:,.2f}</td><td>{bj_time(r['close_date']).strftime('%m-%d %H:%M') if r['close_date'] else '-'}</td><td>{f'${cl:,.2f}' if cl else '-'}</td><td class='{'green' if pp and pp>0 else 'red'}'>{ps}</td><td>{badge}</td></tr>")
                 parts.append("</tbody></table>")
 
-        parts.append(f'<div class="updated">更新于 {datetime.now().strftime("%H:%M:%S")}</div>' + JS + '</body></html>')
+        parts.append(f'<div class="updated">更新于 {bj_time().strftime("%m-%d %H:%M:%S")}</div>' + JS + '</body></html>')
         self.wfile.write("".join(parts).encode())
 
     def log_message(self, *a): pass
