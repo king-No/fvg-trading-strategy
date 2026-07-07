@@ -159,10 +159,16 @@ def main():
     print(f"  参数: SwingW={SWING_W} ADX≥{ADX_TH} FVG窗口={FVG_W}")
     print(f"{'='*60}")
     
-    n4=1200;n1=3000
+    # 计算K线数量 (默认1月, 加--months N)
+    months=1
+    if "--months" in sys.argv:
+        idx=sys.argv.index("--months");months=int(sys.argv[idx+1]) if idx+1<len(sys.argv) else 1
+    days=months*30
+    if tf=="15m":n1=days*96   # 96根/天
+    elif tf=="1h":n1=days*24
+    else:n1=days*6
+    n4=min(n1//6+500,2000)  # 4h数据足够覆盖即可
     bar4="4H";bar1=tf
-    if tf=="1h":n1=2000;n4=800
-    elif tf=="4h":n1=800;n4=300
     
     df4=fetch(n4,bar4);df=fetch(n1,bar1)
     if len(df)==0:print("❌ 无数据");return
