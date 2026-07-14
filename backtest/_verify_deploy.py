@@ -33,8 +33,8 @@ class LGRStrategy(IStrategy):
 
     # --- 出场 ---
     sl_mult = 1.5
-    tp_activate_mult = 1.5
-    tp_trail_mult = 0.2
+    tp_activate_mult = 2.0
+    tp_trail_mult = 0.3
     atr_floor = 30
 
     def informative_pairs(self):
@@ -116,14 +116,6 @@ class LGRStrategy(IStrategy):
             if swp == -1 and (w["FVG"] == -1).any(): signals[i] = -1
             elif swp == 1 and (w["FVG"] == 1).any(): signals[i] = 1
         dataframe["lgr_signal"] = signals
-
-        # 信号距今K线数 (用于时间限制反转)
-        age = np.full(len(dataframe), 999, dtype=int)
-        last_sig = -999
-        for i in range(len(dataframe)):
-            if signals[i] != 0: last_sig = i
-            age[i] = i - last_sig
-        dataframe["age"] = age
         return dataframe
 
     def populate_entry_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
@@ -191,14 +183,13 @@ class LGRStrategy(IStrategy):
                 if current_rate >= self._best_prices[tid] + atr * self.tp_trail_mult:
                     return "trailing_tp"
 
-        # 反转退出 — 仅前8根K线(2h)内允许
+        # 结构反转退出 (SMC破位, 最高权重)
         df, _ = self.dp.get_analyzed_dataframe(pair, self.timeframe)
         if df is not None and len(df) > 0:
-            age = df.iloc[-1].get("age", 0)
-            if age <= 8:  # 前2小时允许反转
-                sig = df.iloc[-1].get("lgr_signal", 0)
-                if sig != 0 and ((sig == 1 and trade.is_short) or (sig == -1 and not trade.is_short)):
-                    return "reversal"
+            sb = df.iloc[-1].get("struct_break", 0)
+            if sb != 0:
+                if (sb == -1 and not trade.is_short) or (sb == 1 and trade.is_short):
+                    return "structure_reversal"
 
         return None
 
