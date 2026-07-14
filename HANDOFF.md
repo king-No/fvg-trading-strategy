@@ -90,10 +90,12 @@
 ### VPS 运行中
 
 ```
-Freqtrade:   LGRStrategy, PID 78507, RUNNING
-品种:        BTC/USDT:USDT + ETH/USDT:USDT
+Freqtrade:   LGRStrategy, PID 107745, RUNNING
+品种:        BTC/USDT:USDT + ETH/USDT:USDT (双品种)
 看板:        http://47.82.99.159:8899 (30s自动刷新)
-DB:          1笔已平仓(#1 BTC多 +2.32%), 0持仓
+DB:          4笔已平仓, 0持仓
+参数:        SL=1.5x | TP激活=1.5x | TP跟随=0.2x | 前8根限时反转
+回测:        293笔 | 62.8%胜率 | PF2.32 | +145% | 回撤-4.56% | 卡玛31.85
 
 VPS SSH:     root@47.82.99.159 / pw: Lhlzyx1122!
 ```
@@ -102,7 +104,10 @@ VPS SSH:     root@47.82.99.159 / pw: Lhlzyx1122!
 
 | # | 品种 | 方向 | 杠杆 | 盈亏 | 出场原因 |
 |:-:|:---:|:---:|:---:|:---:|:--------|
-| 1 | BTC | 多 | 5x | **+2.32%** | 移动止盈(TP) |
+| 1 | BTC | 多 | 5x | +2.32% | TP |
+| 2 | BTC | 多 | 5x | +0.15% | TP |
+| 3 | BTC | 多 | 5x | +0.08% | TP |
+| 4 | BTC | 多 | 5x | -0.12% | SL |
 
 ### 未完成的待办
 

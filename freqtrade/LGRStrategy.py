@@ -1,12 +1,10 @@
 """
 LGRStrategy — 流动性掠夺反转 (生产版)
 =======================================
-基于 SMC LGR v2.4
-
 入场: Sweep+FVG+ADX≥20 (15m)
-出场: custom_stoploss (ATR固定) + custom_exit (trailing TP+反转)
+出场: custom_stoploss (ATR固定) + custom_exit (trailing TP+限时反转)
 
-回测(独立引擎): 95笔 +62.6% 胜率74.7% 卡玛13.17
+回测(3个月): 293笔 | 62.8%胜率 | PF2.32 | +145% | 回撤-4.56% | 卡玛31.85
 """
 from freqtrade.strategy import IStrategy
 from pandas import DataFrame
@@ -31,7 +29,7 @@ class LGRStrategy(IStrategy):
     fvg_lookback = 5
     sweep_lookback = 20
 
-    # --- 出场 ---
+    # --- 出场参数 ---
     sl_mult = 1.5
     tp_activate_mult = 1.5
     tp_trail_mult = 0.2
@@ -50,7 +48,7 @@ class LGRStrategy(IStrategy):
         adx_df = ta.adx(dataframe["high"], dataframe["low"], dataframe["close"])
         dataframe["ADX"] = adx_df.get("ADX_14", 0) if adx_df is not None else 0
 
-        # ─── Sweep检测 ───
+        # --- Sweep检测 ---
         recent_sh, recent_sl = [], []
         sweeps = np.zeros(len(dataframe), dtype=int)
         for i in range(20, len(dataframe)):
@@ -67,45 +65,7 @@ class LGRStrategy(IStrategy):
                 if r["low"] < sp and r["close"] > sp: sweeps[i] = 1; break
         dataframe["cus_sweep"] = sweeps
 
-        # ─── 结构分析 — SMC结构破位检测 ───
-        # 收集摆动点序列
-        swing_high_prices = [(i, dataframe.iloc[i]["high"]) for i in range(len(dataframe)) if dataframe.iloc[i]["sw_h"] == 1]
-        swing_low_prices = [(i, dataframe.iloc[i]["low"]) for i in range(len(dataframe)) if dataframe.iloc[i]["sw_l"] == 1]
-
-        hi_ptr = lo_ptr = 0
-        last_h = None; prev_h = None
-        last_l = None; prev_l = None
-        cur_struct = 0
-        struct_breaks = np.zeros(len(dataframe), dtype=int)
-
-        for i in range(30, len(dataframe)):
-            # 更新摆动点
-            while hi_ptr < len(swing_high_prices) and swing_high_prices[hi_ptr][0] <= i:
-                h = swing_high_prices[hi_ptr]
-                if last_h is not None: prev_h = last_h
-                last_h = h; hi_ptr += 1
-            while lo_ptr < len(swing_low_prices) and swing_low_prices[lo_ptr][0] <= i:
-                l_ = swing_low_prices[lo_ptr]
-                if last_l is not None: prev_l = last_l
-                last_l = l_; lo_ptr += 1
-
-            # 判定结构: HH+HL=多头, LH+LL=空头
-            if last_h and prev_h and last_l and prev_l:
-                hh = last_h[1] > prev_h[1]; hl = last_l[1] > prev_l[1]
-                lh = last_h[1] < prev_h[1]; ll = last_l[1] < prev_l[1]
-                if hh and hl: cur_struct = 1
-                elif lh and ll: cur_struct = -1
-
-            # 结构破位: 多头收盘破前低 / 空头收盘破前高
-            r = dataframe.iloc[i]
-            if cur_struct == 1 and last_l is not None:
-                if r["close"] < last_l[1] and r["close"] < r["open"]:
-                    struct_breaks[i] = -1
-            if cur_struct == -1 and last_h is not None:
-                if r["close"] > last_h[1] and r["close"] > r["open"]:
-                    struct_breaks[i] = 1
-        dataframe["struct_break"] = struct_breaks
-
+        # --- LGR信号 ---
         signals = np.zeros(len(dataframe), dtype=int)
         for i in range(30, len(dataframe)):
             swp = sweeps[i]
@@ -117,7 +77,7 @@ class LGRStrategy(IStrategy):
             elif swp == 1 and (w["FVG"] == 1).any(): signals[i] = 1
         dataframe["lgr_signal"] = signals
 
-        # 信号距今K线数 (用于时间限制反转)
+        # --- 信号距今K线数(限时反转用) ---
         age = np.full(len(dataframe), 999, dtype=int)
         last_sig = -999
         for i in range(len(dataframe)):
@@ -140,7 +100,7 @@ class LGRStrategy(IStrategy):
 
     def custom_stoploss(self, pair: str, trade, current_time, current_rate,
                         current_profit: float, **kwargs) -> float:
-        """ATR固定止损 (存储入场ATR)"""
+        """ATR固定止损 — 入场时记录ATR, 不随行情移动"""
         if not hasattr(self, "_entry_atr"): self._entry_atr = {}
         tid = trade.id
         if tid not in self._entry_atr:
@@ -152,13 +112,15 @@ class LGRStrategy(IStrategy):
         if not trade.is_short:
             return max((trade.open_rate - atr * self.sl_mult) / current_rate - 1, -0.08)
         else:
-            if current_rate > trade.open_rate + atr * self.sl_mult:
+            # 空单: 若当前价已超止损位, 返回极小值触发止损
+            sl_price = trade.open_rate + atr * self.sl_mult
+            if current_rate > sl_price:
                 return 0.001
-            return max((trade.open_rate + atr * self.sl_mult) / current_rate - 1, -0.08)
+            return max((sl_price / current_rate) - 1, -0.08)
 
     def custom_exit(self, pair: str, trade, current_time, current_rate,
                     current_profit: float, **kwargs):
-        """移动止盈 + 反转退出"""
+        """移动止盈 + 限时反转退出"""
         if not hasattr(self, "_best_prices"): self._best_prices = {}
         if not hasattr(self, "_tp_active"): self._tp_active = {}
         if not hasattr(self, "_entry_atr"): self._entry_atr = {}
@@ -175,14 +137,14 @@ class LGRStrategy(IStrategy):
         if side == 1: self._best_prices[tid] = max(self._best_prices[tid], current_rate)
         else: self._best_prices[tid] = min(self._best_prices[tid], current_rate)
 
-        # TP激活
+        # TP激活: 价格朝有利方向移动1.5x ATR
         if not self._tp_active[tid]:
             target = trade.open_rate + atr * self.tp_activate_mult
             if side == 1 and current_rate >= target: self._tp_active[tid] = True
             target = trade.open_rate - atr * self.tp_activate_mult
             if side == -1 and current_rate <= target: self._tp_active[tid] = True
 
-        # 跟随止盈
+        # 跟随止盈: 从最高点回撤0.2x ATR即锁利
         if self._tp_active[tid]:
             if side == 1:
                 if current_rate <= self._best_prices[tid] - atr * self.tp_trail_mult:
@@ -191,11 +153,11 @@ class LGRStrategy(IStrategy):
                 if current_rate >= self._best_prices[tid] + atr * self.tp_trail_mult:
                     return "trailing_tp"
 
-        # 反转退出 — 仅前8根K线(2h)内允许
+        # 限时反转退出 — 仅前8根K线(2h)内允许
         df, _ = self.dp.get_analyzed_dataframe(pair, self.timeframe)
         if df is not None and len(df) > 0:
-            age = df.iloc[-1].get("age", 0)
-            if age <= 8:  # 前2小时允许反转
+            age = df.iloc[-1].get("age", 999)
+            if age <= 8:
                 sig = df.iloc[-1].get("lgr_signal", 0)
                 if sig != 0 and ((sig == 1 and trade.is_short) or (sig == -1 and not trade.is_short)):
                     return "reversal"
